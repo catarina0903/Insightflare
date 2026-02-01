@@ -1,69 +1,81 @@
-# React + TypeScript + Vite
+# Insightflare
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Insightflare is a feedback intelligence dashboard built on Cloudflare. It aggregates incoming feedback, classifies urgency with Workers AI, stores results in D1, and presents a clean UI for triage and trend spotting.
 
-Currently, two official plugins are available:
+## Architecture overview
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Cloudflare Workers**: Serves the API and hosts the frontend build.
+- **D1**: Primary storage for feedback entries.
+- **Workflows**: Durable pipeline to ingest, classify, and store feedback.
+- **Workers AI**: Urgency classification on ingest + sentiment analysis in the modal.
+- **Vite + React**: Frontend UI (search, triage lists, modal).
 
-## Expanding the ESLint configuration
+## Data flow
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+1. **Ingest**: `POST /api/ingest` or `POST /api/ingest/mock`
+2. **Workflow**: `FeedbackIngestWorkflow` runs:
+   - classify urgency (Workers AI, fallback heuristic)
+   - insert into D1
+3. **UI refresh**:
+   - `GET /api/updates` checks for new data
+   - `GET /api/feedback` fetches the latest entries
+4. **Modal sentiment**:
+   - `GET /api/sentiment?id=...` runs Workers AI sentiment analysis
 
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## API endpoints
 
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
+- `GET /api/feedback` → list feedback entries
+- `GET /api/updates` → latest `created_at` timestamp
+- `POST /api/ingest` → ingest a real payload
+- `POST /api/ingest/mock` → generate a mock entry with Workers AI
+- `GET /api/sentiment?id=...` → sentiment analysis for a given entry
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Local development
+
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+In another terminal, run the Worker:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npx wrangler dev --remote
 ```
+
+Note: `--remote` is recommended so Workers AI runs against your account.
+
+## Database setup
+
+Apply migrations locally:
+
+```bash
+npx wrangler d1 migrations apply feedback-dashboard-db --local
+```
+
+Apply migrations remotely:
+
+```bash
+npx wrangler d1 migrations apply feedback-dashboard-db --remote
+```
+
+## Deploy
+
+```bash
+npm run build
+npx wrangler deploy
+```
+
+## Key files
+
+- `worker/index.ts` — API routes + workflow triggers
+- `worker/workflows/feedback_ingest.ts` — ingestion workflow
+- `migrations/*.sql` — D1 schema + seed data
+- `src/App.tsx` — UI
+- `wrangler.jsonc` — bindings (D1, AI, Workflows)
+
+## Notes
+
+- Workers AI binding is configured in `wrangler.jsonc` under `"ai"`.
+- The AI model is set via `AI_MODEL` in `wrangler.jsonc`.
+- The search box filters by `title` or `detail` on the client.
